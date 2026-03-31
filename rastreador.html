@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Rastreador de Tablet</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            background: #f0f0f0;
+            margin: 0;
+        }
+        .status {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .online {
+            color: green;
+            font-weight: bold;
+        }
+        .offline {
+            color: red;
+            font-weight: bold;
+        }
+        .warning {
+            color: orange;
+            font-weight: bold;
+        }
+        .coordenadas {
+            font-family: monospace;
+            font-size: 18px;
+            background: #eee;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .info {
+            font-size: 12px;
+            color: #666;
+            margin-top: 20px;
+        }
+        .dica {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 15px;
+            font-size: 14px;
+            text-align: left;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>📍 Rastreador do Tablet</h1>
+    <div class="status">
+        <h3>Status:</h3>
+        <p id="status">🟡 Aguardando permissão...</p>
+        <p id="localizacao" class="coordenadas">---</p>
+        <p id="hora">---</p>
+        <p id="tabletId">📱 Tablet: <strong>---</strong></p>
+        <button onclick="testarLocalizacao()">📍 Testar Localização Agora</button>
+    </div>
+    <div class="dica" id="dica" style="display: none;">
+        💡 <strong>Dica Importante:</strong><br>
+        Para que a localização funcione corretamente, você precisa acessar esta página de uma das formas:<br><br>
+        ✅ <strong>Opção 1:</strong> Hospede este arquivo em um servidor online gratuito (Netlify, GitHub Pages)<br>
+        ✅ <strong>Opção 2:</strong> Use um app como "Local Server" ou "KWS" no tablet<br>
+        ✅ <strong>Opção 3:</strong> Acesse via http://localhost se estiver usando um servidor local<br><br>
+        ❌ <strong>NÃO FUNCIONA:</strong> Abrir diretamente do arquivo (file://)
+    </div>
+    <div class="info">
+        ⏱️ Este app envia a localização a cada 30 segundos.<br>
+        📡 Mantenha o GPS ativado e o navegador aberto.
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <script>
+        // ================================================
+        // 🔧 CONFIGURAÇÃO DO FIREBASE (seus dados)
+        // ================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyA4xaAp2t8SKu9EEk2wBOtoMcYMMZkzrJA",
+            authDomain: "alura-fundamentosnuvem.firebaseapp.com",
+            databaseURL: "https://dashboard-tablet-default-rtdb.firebaseio.com/",
+            projectId: "alura-fundamentosnuvem",
+            storageBucket: "alura-fundamentosnuvem.firebasestorage.app",
+            messagingSenderId: "452391876913",
+            appId: "1:452391876913:web:e5684c279379c44ecc5810"
+        };
+        
+        // ================================================
+        // ⚠️ IMPORTANTE: ALTERE ESTE ID PARA CADA TABLET
+        // ================================================
+        // Para o primeiro tablet: "Tablet-01"
+        // Para o segundo tablet: "Tablet-02"
+        // Para o terceiro tablet: "Tablet-03"
+        const tabletId = "Tablet-01";  // 🔧 ALTERE AQUI PARA CADA TABLET!
+        
+        // ================================================
+        // NÃO MEXA DAQUI PARA BAIXO
+        // ================================================
+        
+        // Inicializar Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+        
+        // Verificar se está rodando em um contexto seguro
+        function verificarContextoSeguro() {
+            const protocolo = window.location.protocol;
+            const dicaElement = document.getElementById('dica');
+            
+            if (protocolo === 'file:') {
+                document.getElementById('status').innerHTML = '❌ ERRO: Arquivo aberto localmente (file://)<br>A geolocalização NÃO funciona neste modo.';
+                document.getElementById('status').className = 'offline';
+                dicaElement.style.display = 'block';
+                return false;
+            } else if (protocolo === 'http:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+                document.getElementById('status').innerHTML = '⚠️ ATENÇÃO: Página em HTTP não seguro<br>A localização pode não funcionar corretamente.';
+                document.getElementById('status').className = 'warning';
+                dicaElement.style.display = 'block';
+                return false;
+            } else {
+                dicaElement.style.display = 'none';
+                return true;
+            }
+        }
+        
+        // Elementos da tela
+        const statusElement = document.getElementById('status');
+        const localizacaoElement = document.getElementById('localizacao');
+        const horaElement = document.getElementById('hora');
+        const tabletIdElement = document.getElementById('tabletId');
+        
+        // Mostrar qual tablet é
+        tabletIdElement.innerHTML = `📱 Tablet: <strong>${tabletId}</strong>`;
+        
+        // Função para enviar localização
+        function enviarLocalizacao(position) {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const agora = new Date();
+            
+            // Salvar no Firebase
+            database.ref('tablets/' + tabletId).set({
+                lat: lat,
+                lng: lng,
+                ultimaAtualizacao: agora.toISOString(),
+                precisao: position.coords.accuracy + " metros",
+                timestamp: agora.getTime()
+            }).then(() => {
+                statusElement.innerHTML = '🟢 Online - Dados enviados com sucesso!';
+                statusElement.className = 'online';
+                localizacaoElement.innerHTML = `📍 ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+                horaElement.innerHTML = `🕐 Último envio: ${agora.toLocaleTimeString()}`;
+                console.log("✅ Localização enviada:", lat, lng);
+            }).catch(erro => {
+                statusElement.innerHTML = `🔴 Erro ao enviar: ${erro.message}`;
+                statusElement.className = 'offline';
+                console.error("Erro Firebase:", erro);
+            });
+        }
+        
+        // Função para testar localização manualmente
+        function testarLocalizacao() {
+            statusElement.innerHTML = '🟡 Buscando localização...';
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(enviarLocalizacao, erroLocalizacao, {
+                    enableHighAccuracy: true,
+                    timeout: 15000,
+                    maximumAge: 0
+                });
+            } else {
+                statusElement.innerHTML = "❌ Geolocalização não suportada neste navegador";
+                statusElement.className = 'offline';
+            }
+        }
+        
+        // Função de erro de localização
+        function erroLocalizacao(error) {
+            let mensagem = '';
+            let solucao = '';
+            
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    mensagem = '❌ Permissão de localização negada.';
+                    solucao = 'Verifique se a página está sendo acessada via http://localhost ou HTTPS, e se a localização está liberada nas configurações do tablet.';
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    mensagem = '❌ Localização indisponível.';
+                    solucao = 'Verifique se o GPS está ativado e você está em um local com sinal.';
+                    break;
+                case error.TIMEOUT:
+                    mensagem = '⏰ Tempo esgotado.';
+                    solucao = 'Tente novamente em um local com melhor sinal de GPS.';
+                    break;
+                default:
+                    mensagem = `❌ Erro: ${error.message}`;
+                    solucao = 'Tente novamente ou verifique as configurações de localização.';
+            }
+            
+            statusElement.innerHTML = `${mensagem}<br><small>${solucao}</small>`;
+            statusElement.className = 'offline';
+            console.error("Erro Geolocalização:", error);
+        }
+        
+        // Verificar contexto seguro ao carregar
+        const contextoOk = verificarContextoSeguro();
+        
+        // Iniciar o rastreador automático se o contexto for seguro
+        if (contextoOk) {
+            // Enviar localização imediatamente
+            testarLocalizacao();
+            
+            // Configurar envio a cada 30 segundos
+            setInterval(() => {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(enviarLocalizacao, erroLocalizacao, {
+                        enableHighAccuracy: true,
+                        timeout: 15000,
+                        maximumAge: 0
+                    });
+                }
+            }, 30000); // 30 segundos
+            
+            console.log("✅ Rastreador iniciado - Tablet ID: " + tabletId);
+            console.log("📡 Enviando localização a cada 30 segundos");
+        } else {
+            console.warn("⚠️ Contexto não seguro - geolocalização bloqueada");
+        }
+        
+        // Verificar conexão com Firebase
+        database.ref('.info/connected').on('value', (snap) => {
+            if (snap.val() === true) {
+                console.log("✅ Conectado ao Firebase");
+            } else {
+                console.log("❌ Desconectado do Firebase");
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Mapa dos Tablets</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        #map {
+            height: 600px;
+            width: 100%;
+            border-radius: 10px;
+            margin-top: 10px;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .info {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .online {
+            color: green;
+            font-weight: bold;
+        }
+        .offline {
+            color: gray;
+            font-weight: bold;
+        }
+        .atualizar-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .atualizar-btn:hover {
+            background: #45a049;
+        }
+        .status-tablets {
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 14px;
+        }
+        .tablet-item {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+        }
+        .conectado {
+            color: green;
+            font-weight: bold;
+        }
+        .desconectado {
+            color: red;
+        }
+        h1 {
+            margin: 0;
+            color: #333;
+        }
+        .badge {
+            background: #4CAF50;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📍 Localização dos Tablets</h1>
+            <button class="atualizar-btn" onclick="forcarAtualizacao()">🔄 Atualizar Mapa</button>
+        </div>
+        
+        <div class="info">
+            <p><strong>🕐 Última atualização:</strong> <span id="ultimaAtualizacao">---</span></p>
+            <p><strong>📡 Conexão Firebase:</strong> <span id="firebaseStatus">Verificando...</span></p>
+            <div id="statusTablets" class="status-tablets">
+                <p>Carregando tablets...</p>
+            </div>
+        </div>
+        
+        <div id="map"></div>
+        
+        <div class="info" style="margin-top: 20px; font-size: 12px; color: #666;">
+            💡 <strong>Dica:</strong> Clique nos marcadores para ver detalhes do tablet. Tablets online aparecem em verde, offline em cinza.
+        </div>
+    </div>
+
+    <!-- Google Maps API com sua chave -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB8AC6U9ffo54Eow8FECtJ9GIKj_BvbbMM"></script>
+    
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <script>
+        // ================================================
+        // 🔧 CONFIGURAÇÃO DO FIREBASE (seus dados)
+        // ================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyA4xaAp2t8SKu9EEk2wBOtoMcYMMZkzrJA",
+            authDomain: "alura-fundamentosnuvem.firebaseapp.com",
+            databaseURL: "https://dashboard-tablet-default-rtdb.firebaseio.com/",
+            projectId: "alura-fundamentosnuvem",
+            storageBucket: "alura-fundamentosnuvem.firebasestorage.app",
+            messagingSenderId: "452391876913",
+            appId: "1:452391876913:web:e5684c279379c44ecc5810"
+        };
+
+        // Inicializar Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        let map;
+        let markers = {};
+        let ultimaAtualizacaoMapa = null;
+
+        // Inicializar o mapa
+        function initMap() {
+            map = new google.maps.Map(document.getElementById("map"), {
+                center: { lat: -23.5505, lng: -46.6333 }, // Centro inicial (São Paulo)
+                zoom: 12,
+                styles: [
+                    {
+                        featureType: "poi",
+                        elementType: "labels",
+                        stylers: [{ visibility: "off" }]
+                    }
+                ]
+            });
+            console.log("✅ Mapa inicializado com sucesso!");
+        }
+
+        // Função para forçar atualização manual
+        function forcarAtualizacao() {
+            database.ref('tablets').once('value', (snapshot) => {
+                const tablets = snapshot.val();
+                if (tablets) {
+                    atualizarTodosMarcadores(tablets);
+                    document.getElementById("ultimaAtualizacao").innerHTML = new Date().toLocaleString() + " (atualizado manualmente)";
+                }
+            });
+        }
+
+        // Criar ou atualizar marcador de um tablet
+        function atualizarMarcador(tabletId, lat, lng, ultimaAtualizacao, precisao) {
+            const position = { lat: lat, lng: lng };
+            const agora = new Date();
+            const ultima = new Date(ultimaAtualizacao);
+            const minutosAtras = Math.floor((agora - ultima) / 60000);
+            const estaOnline = minutosAtras < 5;  // Considera online se atualizou nos últimos 5 minutos
+
+            if (markers[tabletId]) {
+                // Atualizar posição do marcador existente
+                markers[tabletId].setPosition(position);
+                // Atualizar ícone baseado no status
+                let iconColor = estaOnline ? 'green' : 'gray';
+                markers[tabletId].setIcon(`http://maps.google.com/mapfiles/ms/icons/${iconColor}-dot.png`);
+            } else {
+                // Criar novo marcador com cor baseada no status
+                let iconColor = estaOnline ? 'green' : 'gray';
+                markers[tabletId] = new google.maps.Marker({
+                    position: position,
+                    map: map,
+                    title: tabletId,
+                    icon: `http://maps.google.com/mapfiles/ms/icons/${iconColor}-dot.png`
+                });
+            }
+            
+            // Atualizar a janela de informação
+            const infoContent = `
+                <div style="min-width: 220px; padding: 5px;">
+                    <strong style="font-size: 16px;">📱 ${tabletId}</strong><br>
+                    📍 ${lat.toFixed(6)}, ${lng.toFixed(6)}<br>
+                    🕐 ${ultima.toLocaleString()}<br>
+                    ${precisao ? `🎯 Precisão: ${precisao}<br>` : ''}
+                    <span class="${estaOnline ? 'online' : 'offline'}">
+                        ${estaOnline ? '🟢 Online' : '⚫ Offline (' + minutosAtras + ' min atrás)'}
+                    </span>
+                </div>
+            `;
+            
+            const infowindow = new google.maps.InfoWindow({ content: infoContent });
+            
+            // Remover listener anterior se existir
+            google.maps.event.clearListeners(markers[tabletId], 'click');
+            
+            markers[tabletId].addListener("click", () => {
+                infowindow.open(map, markers[tabletId]);
+            });
+            
+            return estaOnline;
+        }
+
+        // Atualizar todos os marcadores de uma vez
+        function atualizarTodosMarcadores(tablets) {
+            let algumOnline = false;
+            let primeiroOnline = null;
+            let totalTablets = 0;
+            
+            for (const [id, data] of Object.entries(tablets)) {
+                if (data.lat && data.lng) {
+                    totalTablets++;
+                    const estaOnline = atualizarMarcador(id, data.lat, data.lng, data.ultimaAtualizacao, data.precisao);
+                    if (estaOnline) {
+                        algumOnline = true;
+                        if (!primeiroOnline) primeiroOnline = { lat: data.lat, lng: data.lng };
+                    }
+                }
+            }
+            
+            // Se houver tablet online, centralizar nele
+            if (algumOnline && primeiroOnline && map) {
+                map.setCenter({ lat: primeiroOnline.lat, lng: primeiroOnline.lng });
+                map.setZoom(15);
+            } else if (totalTablets > 0 && map) {
+                // Se nenhum online, centralizar no primeiro tablet (mesmo offline)
+                const primeiro = Object.values(tablets)[0];
+                if (primeiro.lat && primeiro.lng) {
+                    map.setCenter({ lat: primeiro.lat, lng: primeiro.lng });
+                    map.setZoom(13);
+                }
+            }
+            
+            return totalTablets;
+        }
+
+        // Atualizar a lista de status
+        function atualizarStatusTablets(tabletsData) {
+            const container = document.getElementById("statusTablets");
+            let onlineCount = 0;
+            let html = "";
+            
+            if (!tabletsData || Object.keys(tabletsData).length === 0) {
+                container.innerHTML = "<p>📭 Nenhum tablet encontrado. Aguardando dados...</p><p>💡 Verifique se o app está rodando nos tablets.</p>";
+                return;
+            }
+            
+            for (const [id, data] of Object.entries(tabletsData)) {
+                const agora = new Date();
+                const ultima = new Date(data.ultimaAtualizacao);
+                const minutosAtras = Math.floor((agora - ultima) / 60000);
+                const estaOnline = minutosAtras < 5;
+                
+                if (estaOnline) onlineCount++;
+                
+                const statusIcon = estaOnline ? '🟢' : '⚫';
+                const statusText = estaOnline ? 'Online' : `Offline (${minutosAtras} min)`;
+                
+                html += `
+                    <div class="tablet-item">
+                        <strong>${statusIcon} ${id}</strong> - ${statusText}<br>
+                        <small>📍 ${data.lat ? data.lat.toFixed(6) : '---'}, ${data.lng ? data.lng.toFixed(6) : '---'}</small><br>
+                        <small>🕐 ${ultima.toLocaleTimeString()}</small>
+                    </div>
+                `;
+            }
+            
+            html += `<div class="tablet-item" style="background: #f0f0f0; margin-top: 10px;">
+                <strong>📈 Resumo:</strong> ${onlineCount} online / ${Object.keys(tabletsData).length} total
+            </div>`;
+            
+            container.innerHTML = html;
+        }
+
+        // Escutar mudanças no Firebase em tempo real
+        database.ref('tablets').on('value', (snapshot) => {
+            const tablets = snapshot.val();
+            
+            if (!tablets) {
+                document.getElementById("statusTablets").innerHTML = "<p>📭 Nenhum tablet encontrado. Aguardando dados...</p>";
+                document.getElementById("ultimaAtualizacao").innerHTML = "Aguardando dados...";
+                return;
+            }
+            
+            // Atualizar marcadores no mapa
+            const total = atualizarTodosMarcadores(tablets);
+            
+            // Atualizar lista de status
+            atualizarStatusTablets(tablets);
+            
+            // Atualizar timestamp
+            document.getElementById("ultimaAtualizacao").innerHTML = new Date().toLocaleString();
+            
+            console.log("📡 Dados atualizados em tempo real - Tablets:", Object.keys(tablets).length);
+        });
+
+        // Verificar conexão com Firebase
+        database.ref('.info/connected').on('value', (snap) => {
+            const statusElement = document.getElementById("firebaseStatus");
+            if (snap.val() === true) {
+                statusElement.innerHTML = '<span class="conectado">✅ Conectado</span>';
+                console.log("✅ Conectado ao Firebase");
+            } else {
+                statusElement.innerHTML = '<span class="desconectado">❌ Desconectado</span>';
+                console.log("❌ Desconectado do Firebase");
+            }
+        });
+
+        // Inicializar o mapa quando a página carregar
+        window.initMap = initMap;
+        
+        // Caso o mapa demore para carregar
+        setTimeout(() => {
+            if (!map) {
+                initMap();
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
